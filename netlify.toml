@@ -1,0 +1,21 @@
+# nabeel-inbox — Netlify site config
+# Publish the repo root (index.html landing page); functions live in
+# netlify/functions. Clean API paths rewrite to the function.
+[build]
+  publish = "."
+  functions = "netlify/functions"
+
+[[redirects]]
+  from = "/inbox"
+  to = "/.netlify/functions/index/inbox"
+  status = 200
+
+[[redirects]]
+  from = "/message"
+  to = "/.netlify/functions/index/message"
+  status = 200
+
+[[redirects]]
+  from = "/domains"
+  to = "/.netlify/functions/index/domains"
+  status = 200
