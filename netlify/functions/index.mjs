@@ -348,6 +348,52 @@ export function cleanEmailBody(input){
     .replace(/\n{3,}/g,'\n\n')
     .trim();
 }
+// Body segments: like cleanEmailBody, but <a href> anchors survive as
+// {t:'link', v:label, u:url} segments so the detail view can render
+// inline links tappable ("تعرف على المزيد" etc.). Only http(s) hrefs
+// with a non-empty label become links; everything else is plain text.
+// No HTML is ever returned — the frontend escapes text and validates
+// URLs itself, so a malicious email cannot inject markup.
+export function bodySegments(htmlSource) {
+  const raw = String(htmlSource || '');
+  if (!raw) return null;
+  const html = decodeEntities(decodeEntities(raw)
+    .replace(/<!--[\s\S]*?-->/g, ' ')
+    .replace(/<(script|style|head|svg|noscript)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, ' ')
+    .replace(/<img\b[^>]*>/gi, ' '));
+  const cleanChunk = s => s
+    .replace(/<(?:br|hr)\b[^>]*>/gi, '\n')
+    .replace(/<\/(?:p|div|table|tr|li|ul|ol|h[1-6]|section|article|blockquote)\s*>/gi, '\n')
+    .replace(/<\/(?:td|th)\s*>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\b(?:https?:\/\/|www\.)[^\s<>"']+\.(?:png|jpg|jpeg|gif|svg|webp|ico)(?:\?[^\s<>"']*)?/gi, ' ')
+    .replace(/[ \t\u00a0\u2000-\u200a\u202f]+/g, ' ')
+    .replace(/\r\n?|\u2028|\u2029/g, '\n')
+    .replace(/ *\n */g, '\n')
+    .replace(/\n{3,}/g, '\n\n');
+  const segs = [];
+  const pushText = s => {
+    const v = cleanChunk(s);
+    if (!v) return;
+    if (segs.length && segs[segs.length - 1].t === 'text') segs[segs.length - 1].v += v;
+    else segs.push({ t: 'text', v });
+  };
+  const anchorRe = /<a\b[^>]*href\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))[^>]*>([\s\S]*?)<\/a\s*>/gi;
+  let last = 0, m;
+  while ((m = anchorRe.exec(html))) {
+    if (m.index > last) pushText(html.slice(last, m.index));
+    const href = (m[1] || m[2] || m[3] || '').trim();
+    const label = decodeEntities(m[4].replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim();
+    if (/^https?:\/\//i.test(href) && label) segs.push({ t: 'link', v: label, u: href });
+    else if (label) pushText(label);
+    last = anchorRe.lastIndex;
+  }
+  if (last < html.length) pushText(html.slice(last));
+  if (segs.length && segs[0].t === 'text') segs[0].v = segs[0].v.replace(/^\s+/, '');
+  if (segs.length && segs[segs.length - 1].t === 'text') segs[segs.length - 1].v = segs[segs.length - 1].v.replace(/\s+$/, '');
+  const out = segs.filter(s => s.t === 'link' || s.v);
+  return out.length ? out : null;
+}
 export function bodyCandidates(mail){
   const m=mail&&typeof mail==='object'?mail:{text:String(mail??'')};
   const plain=[],html=[];
@@ -545,10 +591,26 @@ export function analyzeMessage(mail) {
   const action=actionLinks(c);
   const codes=verificationCodes(c);
   const distinct=[...new Set(codes)].slice(0,3);
+  // Inline-link segments for the detail view, from the HTML body — but
+  // only when they cover the displayed text, so the detail never loses
+  // content vs the plain-text fallback.
+  let segments = null;
+  const htmlSources = bodyCandidates(mail).html;
+  if (htmlSources.length) {
+    const segs = bodySegments(htmlSources.slice().sort((a, b) => b.length - a.length)[0]);
+    if (segs) {
+      // Whitespace-stripped: tag-stripping inserts spaces around anchors
+      // ("word ." vs "word."), which must not fail the match.
+      const segText = segs.map(s => s.v).join('').replace(/\s+/g, '');
+      const full = c.fullText.replace(/\s+/g, '');
+      if (segText && full && (segText === full || segText.includes(full))) segments = segs;
+    }
+  }
   return {
     sender:c.sender, subject:c.subject, preview:c.compact.slice(0,260), fullText:c.fullText,
     codes:distinct,
-    links:action
+    links:action,
+    segments
   };
 }
 export function mailDate(mail) {
@@ -810,7 +872,8 @@ export function createHandler({ fetchFn = globalThis.fetch, domains = VISIBLE_DO
           receivedAt: mailDate(detail) || null,
           text: analysis.fullText,
           codes: analysis.codes,
-          links: analysis.links
+          links: analysis.links,
+          segments: analysis.segments ?? null
         });
       }
 
