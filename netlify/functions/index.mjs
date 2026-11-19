@@ -15,7 +15,7 @@
 // Visible domains — the ONLY visibility gate. These are the bot's live
 // visible domains (read from the bot DB 2026-11-19). Hidden domains must
 // never appear here; a future unhide = update this list + redeploy.
-const VISIBLE_DOMAINS = ["gmail.com","gmail10p.com","googlemail.com","oegmail.com","oemails.com","oletters.com","rommiui.com","suiemail.com","tempmail.edu.pl","voewo.com","yanemail.com"];
+const VISIBLE_DOMAINS = ["gmail10p.com","oegmail.com","oemails.com","oletters.com","rommiui.com","suiemail.com","tempmail.edu.pl","voewo.com","yanemail.com"];
 
 // ---------------------------------------------------------------------------
 // Providers (mail.js). No auth needed for any mail provider.
